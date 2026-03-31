@@ -1,71 +1,55 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import FeedbackSections from "@/components/feedback/FeedbackSections";
+import AppButton from "@/components/ui/AppButton";
+import { toSpeechFriendlyFeedback } from "@/lib/feedback";
 
 export default function FeedbackPage() {
   const router = useRouter();
-  const [feedback, setFeedback] = useState('');
+  const [feedback] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return sessionStorage.getItem("interviewFeedback") || "";
+  });
 
   useEffect(() => {
-    const raw = sessionStorage.getItem('interviewFeedback');
-    if (!raw) return;
+    if (!feedback) return;
 
-    // Clean unwanted symbols (IMPORTANT for voice clarity)
-    const clean = raw
-      .replace(/[⚠✔✖•]/g, '') // remove symbols
-      .replace(/[#*]/g, '')
-      .replace(/\n/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const utter = new SpeechSynthesisUtterance(toSpeechFriendlyFeedback(feedback));
+    const lang = sessionStorage.getItem("interviewLanguage");
 
-    setFeedback(clean);
-
-    // 🔊 Speak feedback
-    const utter = new SpeechSynthesisUtterance(clean);
-    const lang = sessionStorage.getItem('interviewLanguage');
-
-    utter.lang = lang === 'Hindi' ? 'hi-IN' : 'en-US';
+    utter.lang = lang === "Hindi" ? "hi-IN" : "en-US";
     utter.rate = 0.9;
 
     speechSynthesis.cancel();
     speechSynthesis.speak(utter);
-  }, []);
+
+    return () => speechSynthesis.cancel();
+  }, [feedback]);
+
+  const navigateWithSpeechStop = (href: string) => {
+    speechSynthesis.cancel();
+    router.push(href);
+  };
 
   return (
-    <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center p-6">
-
-      {/* Page Title */}
-      <h1 className="text-4xl font-bold text-[var(--color-text)] mb-8 text-center">
-        📝 Interview Feedback
+    <div className="flex min-h-screen flex-col items-center justify-center bg-white p-6">
+      <h1 className="mb-8 text-center text-4xl font-black text-black">
+        Interview Feedback
       </h1>
 
-      {/* Feedback Card */}
-      <div className="max-w-3xl w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl p-8 shadow-lg text-center">
-        <p className="text-[var(--color-text)] leading-relaxed text-lg">
-          {feedback}
-        </p>
+      <div className="w-full max-w-3xl rounded-3xl border border-gray-200 bg-white p-8 shadow-xl">
+        <FeedbackSections feedback={feedback} />
       </div>
 
-      {/* Buttons Section */}
-      <div className="flex gap-6 mt-8">
-
-        {/* Start New Interview */}
-        <button
-          onClick={() => router.push('/interview/setup')}
-          className="flex items-center gap-2 px-6 py-3 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white rounded-lg font-semibold transition"
-        >
-          🔄 Start New Interview
-        </button>
-
-        {/* Dashboard */}
-        <button
-          onClick={() => router.push('/dashboard')}
-          className="flex items-center gap-2 px-6 py-3 bg-[var(--color-secondary)] hover:bg-[var(--color-secondary-hover)] text-[var(--color-text)] rounded-lg font-semibold transition"
-        >
-          🏠 Go To Dashboard
-        </button>
-
+      <div className="mt-8 flex flex-col gap-4 sm:flex-row">
+        <AppButton onClick={() => navigateWithSpeechStop("/interview/setup")}>
+          Start New Interview
+        </AppButton>
+        <AppButton onClick={() => navigateWithSpeechStop("/dashboard")}>
+          Go To Dashboard
+        </AppButton>
       </div>
     </div>
   );

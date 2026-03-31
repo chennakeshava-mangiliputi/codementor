@@ -1,12 +1,10 @@
-'use client';
-
-import { useEffect, useState } from 'react';
+"use client";
 
 interface CaptionDisplayProps {
-  speaker: 'ai' | 'user';
+  speaker: "ai" | "user";
   text: string;
   isActive: boolean;
-  language: 'English' | 'Hindi';
+  language: "English" | "Hindi";
 }
 
 export default function CaptionDisplay({
@@ -15,27 +13,18 @@ export default function CaptionDisplay({
   isActive,
   language,
 }: CaptionDisplayProps) {
-  const [displayText, setDisplayText] = useState('');
-
-  useEffect(() => {
-    if (isActive && text) {
-      setDisplayText(text);
-    } else {
-      const timeout = setTimeout(() => setDisplayText(''), 3000);
-      return () => clearTimeout(timeout);
-    }
-  }, [text, isActive]);
-
-  if (!displayText) return null;
+  if (!isActive || !text.trim()) return null;
 
   const speakerConfig = {
     ai: {
-      label: language === 'Hindi' ? 'AI' : 'AI',
-      color: '#32A08D',
+      label: language === "Hindi" ? "AI" : "AI",
+      backgroundColor: "#f3f4f6",
+      border: "1px solid #d1d5db",
     },
     user: {
-      label: language === 'Hindi' ? 'आप' : 'You',
-      color: '#2563EB',
+      label: language === "Hindi" ? "आप" : "You",
+      backgroundColor: "#ffffff",
+      border: "1px solid #9ca3af",
     },
   };
 
@@ -44,32 +33,24 @@ export default function CaptionDisplay({
   return (
     <div
       className="fixed bottom-20 left-1/2 transform -translate-x-1/2 max-w-[85%] z-50 transition-opacity duration-300"
-      style={{
-        opacity: isActive ? 1 : 0,
-      }}
+      style={{ opacity: isActive ? 1 : 0 }}
     >
       <div
-        className="rounded-lg shadow-2xl px-6 py-4"
+        className="rounded-lg shadow-lg px-6 py-4"
         style={{
-          backgroundColor: 'rgba(0, 0, 0, 0.90)',
-          borderLeft: `4px solid ${config.color}`,
+          backgroundColor: config.backgroundColor,
+          border: config.border,
         }}
       >
         <div className="flex items-start gap-3">
-          <span
-            className="font-semibold text-sm uppercase tracking-wide flex-shrink-0"
-            style={{ color: config.color }}
-          >
+          <span className="font-semibold text-sm uppercase tracking-wide flex-shrink-0 text-gray-800">
             {config.label}:
           </span>
           <p
-            className="text-white text-lg leading-relaxed"
-            style={{
-              fontWeight: 500,
-              lineHeight: 1.5,
-            }}
+            className="text-black text-lg leading-relaxed"
+            style={{ fontWeight: 500, lineHeight: 1.5 }}
           >
-            {displayText}
+            {text}
           </p>
         </div>
       </div>

@@ -1,7 +1,8 @@
-// components/interview/CodeEditor.tsx
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
+import { useState } from "react";
+import Editor from "@monaco-editor/react";
+import AppButton from "@/components/ui/AppButton";
 
 interface CodeEditorProps {
   language: string;
@@ -16,67 +17,80 @@ export default function CodeEditor({
   language,
   onSubmit,
   disabled = false,
-  initialCode = '',
+  initialCode = "",
   readOnly = false,
   placeholder,
 }: CodeEditorProps) {
-  // The editor's internal state
-  const [code, setCode] = useState(initialCode || '');
-
-  // If initialCode changes (AI result arrives), update editor
-  useEffect(() => {
-    setCode(initialCode || '');
-  }, [initialCode]);
+  const [code, setCode] = useState(initialCode || "");
 
   const handleSubmit = () => {
     if (onSubmit) onSubmit(code);
   };
 
-  // Basic keyboard indent helper (keeps your old behavior)
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const textarea = e.currentTarget;
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const newCode = code.substring(0, start) + '    ' + code.substring(end);
-      setCode(newCode);
-      // Move cursor after inserted spaces
-      setTimeout(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + 4;
-      }, 0);
-    }
-  };
+  const normalizedLanguage =
+    language.toLowerCase() === "c++" ? "cpp" : language.toLowerCase();
 
   return (
-    <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+    <div className="rounded-2xl border border-gray-300 bg-white p-4 shadow-sm">
       <div className="flex justify-between items-center mb-3">
-        <h3 className="font-semibold text-white">Code Editor ({language})</h3>
-        <span className="text-xs text-slate-400">
-          {readOnly ? 'Read-only (AI solution)' : 'Write your solution below'}
+        <h3 className="font-semibold text-black">Code Editor ({language})</h3>
+        <span className="text-xs text-gray-600">
+          {readOnly ? "Read-only (AI solution)" : "Write your solution below"}
         </span>
       </div>
 
-      <textarea
+      <div className="overflow-hidden rounded-xl border border-gray-300">
+        <Editor
+          height="460px"
+          defaultLanguage={normalizedLanguage}
+          language={normalizedLanguage}
+          value={code}
+          onChange={(value) => setCode(value ?? "")}
+          theme="vs"
+          options={{
+            readOnly: disabled || readOnly,
+            minimap: { enabled: false },
+            fontSize: 14,
+            lineNumbers: "on",
+            tabSize: 2,
+            insertSpaces: true,
+            automaticLayout: true,
+            bracketPairColorization: { enabled: true },
+            autoIndent: "advanced",
+            formatOnPaste: true,
+            formatOnType: true,
+            scrollBeyondLastLine: false,
+            wordWrap: "on",
+            padding: { top: 16, bottom: 16 },
+          }}
+          loading={
+            <div className="flex h-[460px] items-center justify-center bg-gray-50 text-sm text-gray-500">
+              Loading editor...
+            </div>
+          }
+        />
+      </div>
+
+      {!code && placeholder && (
+        <p className="mt-2 text-xs text-gray-500">{placeholder}</p>
+      )}
+
+      {/* Monaco handles tab indentation and editor behavior natively. */}
+      {/* placeholder is shown below because Monaco does not support native placeholders. */}
+      <input
+        type="hidden"
         value={code}
-        onChange={(e) => setCode(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder || `// Write your ${language} code here`}
-        disabled={disabled || readOnly}
-        rows={14}
-        className="w-full bg-slate-900 text-sm text-white p-3 rounded-md font-mono border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
 
       <div className="mt-4 flex justify-end">
-        {/* Only show submit for editable mode when onSubmit exists */}
         {!readOnly && onSubmit && (
-          <button
+          <AppButton
             onClick={handleSubmit}
             disabled={disabled || !code.trim()}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            className="min-w-40"
           >
             Submit Code
-          </button>
+          </AppButton>
         )}
       </div>
     </div>

@@ -14,9 +14,12 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "CODEMENTOR - Transform Code into Interview Success",
-  description: "Master your coding interviews with AI-powered interview simulations, real-time feedback, and intelligent learning.",
+  description:
+    "Master your coding interviews with AI-powered interview simulations, real-time feedback, and intelligent learning.",
   icons: {
-    icon: "/favicon.ico",  // ← CHANGED TO favicon.ico
+    icon: "/codementor-monitor.svg",
+    shortcut: "/codementor-monitor.svg",
+    apple: "/codementor-monitor.svg",
   },
 };
 

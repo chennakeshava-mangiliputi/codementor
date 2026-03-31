@@ -1,62 +1,109 @@
 import { NextResponse } from "next/server";
 import { getGeminiModel } from "@/lib/gemini-keys";
+import {
+  getDiversityPrompt,
+  getFallbackProblem,
+  normalizeProblemTitle,
+} from "@/lib/interview-content";
 
-export async function POST(req: Request) {
-
-  try {
-
-    const { programmingLanguage, difficulty, interviewLanguage } =
-      await req.json();
-
-    const model = getGeminiModel();
-
-    const prompt = `
-Generate ONE ${difficulty} coding problem in ${programmingLanguage}.
-
-Return STRICT JSON ONLY:
-
-{
-"title": "string",
-"description": "string",
-"input": "string",
-"output": "string"
+interface GeneratedProblemPayload {
+  title?: string;
+  description?: string;
+  input?: string;
+  output?: string;
+  constraints?: string;
 }
 
-No explanation. No markdown. No examples.
+function isValidProblem(problem: GeneratedProblemPayload) {
+  return (
+    problem &&
+    typeof problem.title === "string" &&
+    typeof problem.description === "string" &&
+    typeof problem.input === "string" &&
+    typeof problem.output === "string"
+  );
+}
+
+function normalizeProblem(
+  problem: GeneratedProblemPayload,
+  difficulty: string,
+  previousTitles: string[],
+) {
+  const fallback = getFallbackProblem(difficulty, previousTitles);
+
+  return {
+    title: problem.title?.trim() || fallback.title,
+    description: problem.description?.trim() || fallback.description,
+    input: problem.input?.trim() || fallback.input,
+    output: problem.output?.trim() || fallback.output,
+    constraints: problem.constraints?.trim() || fallback.constraints,
+  };
+}
+
+export async function POST(req: Request) {
+  try {
+    const {
+      programmingLanguage,
+      difficulty,
+      interviewLanguage,
+      previousTitles = [],
+    } = await req.json();
+    const model = getGeminiModel();
+    const fallbackProblem = getFallbackProblem(difficulty, previousTitles);
+
+    const prompt = `
+Generate ONE realistic coding interview question for a ${difficulty} level candidate using ${programmingLanguage}.
+
+Requirements:
+- The problem must feel like a real interview question commonly asked by companies.
+- Match the difficulty strictly. Easy must stay easy, Medium must stay medium, and Hard must stay hard.
+- Avoid trivial prompts such as checking even or odd numbers or summing two numbers.
+- Make it different from overused toy examples.
+- ${getDiversityPrompt(difficulty, previousTitles)}
+- Use ${programmingLanguage} only as the target solution language, not as part of the question text.
+- Write the title, description, input, output, and constraints in ${interviewLanguage}.
+- If ${interviewLanguage} is Hindi, use natural spoken Hindi.
+
+Return STRICT JSON ONLY:
+{
+  "title": "string",
+  "description": "string",
+  "input": "string",
+  "output": "string",
+  "constraints": "string"
+}
 `;
 
     const result = await model.generateContent(prompt);
-
-    let text = result.response.text();
-
-    // 🔥 remove markdown if Gemini adds it
-    text = text.replace(/```json|```/g, "").trim();
-
-    let parsed;
+    const text = result.response.text().replace(/```json|```/g, "").trim();
 
     try {
-      parsed = JSON.parse(text);
-    } catch (e) {
-      console.error("Gemini returned invalid JSON:", text);
+      const parsed = JSON.parse(text);
+      const normalizedPreviousTitles = previousTitles.map(normalizeProblemTitle);
 
-      return NextResponse.json(
-        { error: "Invalid AI response" },
-        { status: 500 }
-      );
+      if (
+        !isValidProblem(parsed) ||
+        normalizedPreviousTitles.includes(normalizeProblemTitle(parsed.title || ""))
+      ) {
+        throw new Error("Invalid or repeated AI problem");
+      }
+
+      return NextResponse.json({
+        problem: normalizeProblem(parsed, difficulty, previousTitles),
+        source: "ai",
+      });
+    } catch {
+      return NextResponse.json({
+        problem: fallbackProblem,
+        source: "fallback",
+      });
     }
-
-    // 🔥 validate required fields
-    if (!parsed.title || !parsed.description) {
-      return NextResponse.json(
-        { error: "Incomplete AI problem" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ problem: parsed });
-
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: "Failed" }, { status: 500 });
+
+    return NextResponse.json(
+      { problem: getFallbackProblem("Medium"), source: "fallback" },
+      { status: 200 },
+    );
   }
 }

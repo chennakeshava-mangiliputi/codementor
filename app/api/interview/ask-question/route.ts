@@ -1,49 +1,56 @@
 import { NextResponse } from "next/server";
 import { getGeminiModel } from "@/lib/gemini-keys";
 
+interface ConversationTurn {
+  speaker: "ai" | "user";
+  text: string;
+}
+
 export async function POST(req: Request) {
   try {
     const { code, problem, conversation, questionNumber, interviewLanguage } =
       await req.json();
 
     const model = getGeminiModel();
-
     const history = conversation
       .map(
-        (c: any) =>
-          `${c.speaker === "ai" ? "Interviewer" : "Candidate"}: ${c.text}`
+        (c: ConversationTurn) =>
+          `${c.speaker === "ai" ? "Interviewer" : "Candidate"}: ${c.text}`,
       )
       .join("\n");
 
     const prompt =
       interviewLanguage === "Hindi"
         ? `
-आप एक वास्तविक टेक्निकल इंटरव्यूअर हैं।
+You are a real technical interviewer.
 
-नियम:
-- पहले उम्मीदवार के पिछले उत्तर पर छोटा रिएक्शन दें
-- फिर अगला सवाल पूछें
-- कोई markdown या symbols इस्तेमाल ना करें
+Rules:
+- Reply completely in natural spoken Hindi.
+- First react briefly to the candidate's previous answer.
+- Then ask the next interview question.
+- Do not use markdown, bullets, code formatting, or special symbols.
+- Keep the wording speech-friendly.
 
-समस्या:
+Problem:
 ${problem.title}
 ${problem.description}
 
-उम्मीदवार का कोड:
+Candidate Code:
 ${code}
 
-पिछली बातचीत:
-${history || "कोई नहीं"}
+Conversation:
+${history || "None"}
 
-अब प्रश्न नंबर ${questionNumber} पूछें।
+Ask question number ${questionNumber}.
 `
         : `
 You are a real technical interviewer.
 
 Rules:
-- First react shortly to previous answer
-- Then ask next question
-- No markdown or symbols
+- First react shortly to the previous answer.
+- Then ask the next question.
+- Do not use markdown or special symbols.
+- Keep the wording speech-friendly.
 
 Problem:
 ${problem.title}
@@ -59,7 +66,11 @@ Ask question number ${questionNumber}.
 `;
 
     const result = await model.generateContent(prompt);
-    const text = result.response.text().replace(/[*#]/g, "").trim();
+    const text = result.response
+      .text()
+      .replace(/[*#`]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
     return NextResponse.json({ question: text });
   } catch (error) {

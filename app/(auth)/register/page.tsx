@@ -1,8 +1,12 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { MailCheck, Sparkles } from "lucide-react";
+import type React from "react";
+import { useState } from "react";
+import AppButton from "@/components/ui/AppButton";
+import PasswordField from "@/components/ui/PasswordField";
 
 interface FormData {
   fullName: string;
@@ -19,43 +23,47 @@ interface FormErrors {
   general?: string;
 }
 
+const inputClasses =
+  "w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-black placeholder-gray-600 outline-none transition focus:border-black";
+
 export default function RegisterPage() {
   const router = useRouter();
   const [formData, setFormData] = useState<FormData>({
-    fullName: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
+    fullName: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
   });
-
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
-  const [successEmail, setSuccessEmail] = useState('');
+  const [successEmail, setSuccessEmail] = useState("");
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
 
     if (!formData.fullName.trim()) {
-      newErrors.fullName = 'Full name is required';
+      newErrors.fullName = "Full name is required";
     } else if (formData.fullName.trim().length < 2) {
-      newErrors.fullName = 'Name must be at least 2 characters';
+      newErrors.fullName = "Name must be at least 2 characters";
     }
 
     if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
+      newErrors.email = "Email is required";
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email address';
+      newErrors.email = "Please enter a valid email address";
     }
 
     if (!formData.password) {
-      newErrors.password = 'Password is required';
+      newErrors.password = "Password is required";
     } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
+      newErrors.password = "Password must be at least 8 characters";
     }
 
-    if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match';
+    if (!formData.confirmPassword) {
+      newErrors.confirmPassword = "Please confirm your password";
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = "Passwords do not match";
     }
 
     setErrors(newErrors);
@@ -76,21 +84,28 @@ export default function RegisterPage() {
     }
   };
 
+  const resetForm = () => {
+    setFormData({
+      fullName: "",
+      email: "",
+      password: "",
+      confirmPassword: "",
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validateForm()) {
-      return;
-    }
+    if (!validateForm()) return;
 
     setLoading(true);
     setErrors({});
 
     try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           fullName: formData.fullName,
@@ -102,22 +117,21 @@ export default function RegisterPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        setErrors({ general: data.message || 'Registration failed' });
+        setErrors({ general: data.message || "Registration failed" });
         setLoading(false);
         return;
       }
 
       setRegistrationSuccess(true);
       setSuccessEmail(formData.email);
-      setFormData({
-        fullName: '',
-        email: '',
-        password: '',
-        confirmPassword: '',
-      });
-    } catch (error: any) {
+      resetForm();
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "An error occurred during registration";
       setErrors({
-        general: error.message || 'An error occurred during registration',
+        general: message,
       });
     } finally {
       setLoading(false);
@@ -126,96 +140,79 @@ export default function RegisterPage() {
 
   if (registrationSuccess) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4 py-8">
+      <div className="flex min-h-screen items-center justify-center bg-white px-4 py-8">
         <div className="w-full max-w-md">
-          <div className="bg-slate-800 rounded-2xl shadow-2xl overflow-hidden border border-slate-700">
-            <div className="bg-gradient-to-r from-green-500 to-emerald-500 px-6 py-8 text-center">
-              <div className="mb-4">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-full">
-                  <svg
-                    className="w-8 h-8 text-green-500"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+          <div className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-xl">
+            <div className="px-6 py-8 text-center">
+              <div className="mb-4 flex justify-center">
+                <div className="inline-flex h-16 w-16 items-center justify-center rounded-full border border-gray-200 bg-gray-50">
+                  <MailCheck size={30} />
                 </div>
               </div>
-              <h2 className="text-2xl font-bold text-white">Registration Successful!</h2>
+              <h2 className="text-2xl font-bold text-black">
+                Registration Successful!
+              </h2>
             </div>
 
             <div className="px-6 py-8 text-center">
-              <div className="mb-6 p-4 bg-slate-700 border-2 border-blue-500 rounded-lg">
-                <p className="text-slate-200 mb-2">
-                  <span className="font-bold text-lg">📧 Verification email sent to:</span>
+              <div className="mb-6 rounded-xl border border-gray-300 bg-gray-50 p-4">
+                <p className="mb-2 text-gray-700">
+                  <span className="text-lg font-bold">Verification email sent to:</span>
                 </p>
-                <p className="text-lg font-mono text-blue-400 break-all font-semibold">{successEmail}</p>
+                <p className="break-all font-mono text-lg font-semibold text-black">
+                  {successEmail}
+                </p>
               </div>
 
               <div className="space-y-4">
                 <div className="text-left">
-                  <h3 className="font-bold text-slate-200 mb-3 text-lg">What happens next?</h3>
-                  <ol className="space-y-3 text-sm text-slate-300">
-                    <li className="flex items-start">
-                      <span className="font-bold text-green-400 mr-3 text-lg">1.</span>
-                      <span className="font-semibold">Check your email inbox (and spam folder)</span>
-                    </li>
-                    <li className="flex items-start">
-                      <span className="font-bold text-green-400 mr-3 text-lg">2.</span>
-                      <span className="font-semibold">Look for email from "CODEMENTOR"</span>
-                    </li>
-                    <li className="flex items-start">
-                      <span className="font-bold text-green-400 mr-3 text-lg">3.</span>
-                      <span className="font-semibold">Click "✓ Verify My Account" button</span>
-                    </li>
-                    <li className="flex items-start">
-                      <span className="font-bold text-green-400 mr-3 text-lg">4.</span>
-                      <span className="font-semibold">You'll be redirected to login page</span>
-                    </li>
-                    <li className="flex items-start">
-                      <span className="font-bold text-green-400 mr-3 text-lg">5.</span>
-                      <span className="font-semibold">Login with your email and password</span>
-                    </li>
+                  <h3 className="mb-3 text-lg font-bold text-gray-700">
+                    What happens next?
+                  </h3>
+                  <ol className="space-y-3 text-sm text-gray-700">
+                    {[
+                      "Check your email inbox and spam folder.",
+                      'Look for an email from "CODEMENTOR".',
+                      "Click the Verify My Account button.",
+                      "You will be redirected to the login page.",
+                      "Log in with your email and password.",
+                    ].map((step, index) => (
+                      <li key={step} className="flex items-start">
+                        <span className="mr-3 text-lg font-bold text-black">
+                          {index + 1}.
+                        </span>
+                        <span className="font-semibold">{step}</span>
+                      </li>
+                    ))}
                   </ol>
                 </div>
 
-                <div className="bg-slate-700 border-l-4 border-yellow-400 rounded-lg p-4 mt-5">
-                  <p className="text-sm text-yellow-300 font-semibold">
-                    ⏰ Verification link expires in 24 hours
+                <div className="rounded-xl border border-gray-300 bg-gray-50 p-4">
+                  <p className="text-sm font-semibold text-gray-700">
+                    Verification link expires in 24 hours
                   </p>
                 </div>
               </div>
 
               <div className="mt-8 space-y-3">
-                <Link
-                  href="/login"
-                  className="block w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 px-4 rounded-lg transition duration-200 shadow-md hover:shadow-lg"
-                >
+                <AppButton href="/login" fullWidth>
                   Go Back to Login
-                </Link>
-                <button
+                </AppButton>
+                <AppButton
                   onClick={() => {
                     setRegistrationSuccess(false);
-                    setFormData({
-                      fullName: '',
-                      email: '',
-                      password: '',
-                      confirmPassword: '',
-                    });
+                    resetForm();
+                    router.refresh();
                   }}
-                  className="block w-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-3 px-4 rounded-lg transition duration-200"
+                  fullWidth
                 >
                   Register Another Account
-                </button>
+                </AppButton>
               </div>
             </div>
           </div>
 
-          <div className="text-center mt-6 text-slate-400 text-sm font-semibold">
+          <div className="mt-6 text-center text-sm font-semibold text-gray-600">
             <p>Email not arriving? Check your spam folder</p>
           </div>
         </div>
@@ -224,24 +221,35 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4 py-8">
-      <div className="w-full max-w-md">
-        <div className="bg-slate-800 rounded-2xl shadow-2xl overflow-hidden border border-slate-700">
-          <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-6 py-8 border-b border-slate-700">
-            <h1 className="text-3xl font-bold text-white">Create Account</h1>
-            <p className="text-slate-300 mt-2 font-semibold">Join CODEMENTOR today</p>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white px-4 py-8">
+      <div className="absolute left-0 top-0 h-96 w-96 rounded-full bg-gray-100 blur-3xl opacity-80" />
+      <div className="absolute bottom-0 right-0 h-96 w-96 rounded-full bg-neutral-100 blur-3xl opacity-80" />
+
+      <div className="relative w-full max-w-md">
+        <div className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-xl">
+          <div className="border-b border-gray-200 px-6 py-8">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm">
+                <Sparkles size={24} />
+              </div>
+              <p className="text-sm font-medium text-gray-600">Join CODEMENTOR today</p>
+            </div>
+            <h1 className="text-3xl font-bold text-black">Create Account</h1>
           </div>
 
-          <form onSubmit={handleSubmit} className="px-8 py-8 space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5 px-8 py-8">
             {errors.general && (
-              <div className="bg-red-950 border-l-4 border-red-500 text-red-200 px-4 py-3 rounded">
+              <div className="rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-black">
                 <p className="font-bold">Error</p>
-                <p className="text-sm mt-1">{errors.general}</p>
+                <p className="mt-1 text-sm">{errors.general}</p>
               </div>
             )}
 
             <div>
-              <label htmlFor="fullName" className="block text-sm font-bold text-slate-200 mb-3">
+              <label
+                htmlFor="fullName"
+                className="mb-3 block text-sm font-bold text-gray-700"
+              >
                 Full Name
               </label>
               <input
@@ -251,17 +259,18 @@ export default function RegisterPage() {
                 value={formData.fullName}
                 onChange={handleChange}
                 placeholder="e.g. John Doe"
-                className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-0 transition text-white placeholder-slate-500 bg-slate-700 ${
-                  errors.fullName ? 'border-red-500' : 'border-slate-600 focus:border-blue-500'
-                }`}
+                className={inputClasses}
               />
               {errors.fullName && (
-                <p className="text-red-400 text-xs font-bold mt-2">⚠ {errors.fullName}</p>
+                <p className="mt-2 text-xs font-bold text-black">{errors.fullName}</p>
               )}
             </div>
 
             <div>
-              <label htmlFor="email" className="block text-sm font-bold text-slate-200 mb-3">
+              <label
+                htmlFor="email"
+                className="mb-3 block text-sm font-bold text-gray-700"
+              >
                 Email Address
               </label>
               <input
@@ -271,78 +280,64 @@ export default function RegisterPage() {
                 value={formData.email}
                 onChange={handleChange}
                 placeholder="e.g. john@example.com"
-                className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-0 transition text-white placeholder-slate-500 bg-slate-700 ${
-                  errors.email ? 'border-red-500' : 'border-slate-600 focus:border-blue-500'
-                }`}
+                className={inputClasses}
               />
               {errors.email && (
-                <p className="text-red-400 text-xs font-bold mt-2">⚠ {errors.email}</p>
+                <p className="mt-2 text-xs font-bold text-black">{errors.email}</p>
               )}
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-bold text-slate-200 mb-3">
+              <label
+                htmlFor="password"
+                className="mb-3 block text-sm font-bold text-gray-700"
+              >
                 Password
               </label>
-              <input
-                type="password"
+              <PasswordField
                 id="password"
                 name="password"
                 value={formData.password}
                 onChange={handleChange}
                 placeholder="Minimum 8 characters"
-                className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-0 transition text-white placeholder-slate-500 bg-slate-700 ${
-                  errors.password ? 'border-red-500' : 'border-slate-600 focus:border-blue-500'
-                }`}
+                className={inputClasses}
               />
               {errors.password && (
-                <p className="text-red-400 text-xs font-bold mt-2">⚠ {errors.password}</p>
+                <p className="mt-2 text-xs font-bold text-black">{errors.password}</p>
               )}
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-bold text-slate-200 mb-3">
+              <label
+                htmlFor="confirmPassword"
+                className="mb-3 block text-sm font-bold text-gray-700"
+              >
                 Confirm Password
               </label>
-              <input
-                type="password"
+              <PasswordField
                 id="confirmPassword"
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={handleChange}
                 placeholder="Re-enter your password"
-                className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-0 transition text-white placeholder-slate-500 bg-slate-700 ${
-                  errors.confirmPassword ? 'border-red-500' : 'border-slate-600 focus:border-blue-500'
-                }`}
+                className={inputClasses}
               />
               {errors.confirmPassword && (
-                <p className="text-red-400 text-xs font-bold mt-2">⚠ {errors.confirmPassword}</p>
+                <p className="mt-2 text-xs font-bold text-black">
+                  {errors.confirmPassword}
+                </p>
               )}
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-blue-400 disabled:to-indigo-400 text-white font-bold py-3 px-4 rounded-lg transition duration-200 mt-7 shadow-md hover:shadow-lg"
-            >
-              {loading ? (
-                <span className="flex items-center justify-center">
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Creating Account...
-                </span>
-              ) : (
-                'Create Account'
-              )}
-            </button>
+            <AppButton type="submit" disabled={loading} fullWidth>
+              {loading ? "Creating Account..." : "Create Account"}
+            </AppButton>
           </form>
 
-          <div className="bg-slate-700 px-6 py-4 border-t border-slate-600 text-center">
-            <p className="text-slate-300 text-sm font-semibold">
-              Already have an account?{' '}
-              <Link href="/login" className="text-blue-400 font-bold hover:text-blue-300 hover:underline">
+          <div className="border-t border-gray-200 bg-gray-50 px-6 py-4 text-center">
+            <p className="text-sm font-semibold text-gray-700">
+              Already have an account?{" "}
+              <Link href="/login" className="font-bold text-black hover:underline">
                 Login here
               </Link>
             </p>

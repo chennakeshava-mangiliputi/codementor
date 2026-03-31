@@ -1,80 +1,56 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import FeedbackSections from "@/components/feedback/FeedbackSections";
+import AppButton from "@/components/ui/AppButton";
+import { toSpeechFriendlyFeedback } from "@/lib/feedback";
 
 export default function LearningFeedbackPage() {
   const router = useRouter();
-  const [feedback, setFeedback] = useState('');
-
-  // ✅ Remove awkward symbols from feedback
-  const cleanFeedbackText = (text: string) => {
-    return text
-      .replace(/[✓✔]/g, '')   // remove checkmarks
-      .replace(/[⚠△▲]/g, '')  // remove warning symbols
-      .replace(/\s+/g, ' ')   // normalize spacing
-      .trim();
-  };
+  const [feedback] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return sessionStorage.getItem("learningFeedback") || "";
+  });
 
   useEffect(() => {
-    const storedFeedback = sessionStorage.getItem('learningFeedback');
-
-    if (!storedFeedback) {
-      router.push('/learning-mode/setup');
+    if (!feedback) {
+      router.push("/learning-mode/setup");
       return;
     }
 
-    // ✅ Clean feedback before displaying
-    const cleanedFeedback = cleanFeedbackText(storedFeedback);
-    setFeedback(cleanedFeedback);
-
-    // 🔊 Speak cleaned feedback
-    const utter = new SpeechSynthesisUtterance(cleanedFeedback);
-    utter.lang = 'en-US';
+    const utter = new SpeechSynthesisUtterance(
+      toSpeechFriendlyFeedback(feedback),
+    );
+    const interviewLanguage = sessionStorage.getItem("interviewLanguage");
+    utter.lang = interviewLanguage === "Hindi" ? "hi-IN" : "en-US";
 
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
 
-  }, [router]);
+    return () => window.speechSynthesis.cancel();
+  }, [feedback, router]);
+
+  const navigateWithSpeechStop = (href: string) => {
+    window.speechSynthesis.cancel();
+    router.push(href);
+  };
 
   return (
-    <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center p-6">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-white p-6">
+      <h1 className="mb-8 text-4xl font-black text-black">Learning Mode Feedback</h1>
 
-      {/* Title */}
-      <h1 className="text-3xl font-bold text-[var(--color-text)] mb-8">
-        🟩 Learning Mode Feedback
-      </h1>
-
-      {/* Feedback Box */}
-      <div className="max-w-3xl w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 shadow-lg text-center">
-
-        <h2 className="text-xl font-semibold text-[var(--color-text)] mb-4">
-          AI Feedback
-        </h2>
-
-        <p className="text-[var(--color-text-secondary)] whitespace-pre-wrap leading-relaxed">
-          {feedback}
-        </p>
-
+      <div className="w-full max-w-3xl rounded-3xl border border-gray-200 bg-white p-8 shadow-xl">
+        <FeedbackSections feedback={feedback} />
       </div>
 
-      {/* Buttons */}
-      <div className="flex gap-6 mt-8">
-
-        <button
-          onClick={() => router.push('/learning-mode/setup')}
-          className="px-6 py-3 bg-[var(--color-secondary)] hover:bg-[var(--color-secondary-hover)] text-[var(--color-text)] font-semibold rounded-lg transition-all"
-        >
-          New Learning Session
-        </button>
-
-        <button
-          onClick={() => router.push('/dashboard')}
-          className="px-6 py-3 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white font-semibold rounded-lg transition-all"
-        >
+      <div className="mt-8 flex flex-col gap-4 sm:flex-row">
+        <AppButton onClick={() => navigateWithSpeechStop("/learning-mode/setup")}>
+          Start New Interview
+        </AppButton>
+        <AppButton onClick={() => navigateWithSpeechStop("/dashboard")}>
           Go To Dashboard
-        </button>
-
+        </AppButton>
       </div>
     </div>
   );

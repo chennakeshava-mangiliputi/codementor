@@ -1,371 +1,575 @@
-// app/(dashboard)/learning-mode/session/page.tsx
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import CodeEditor from '@/components/interview/CodeEditor';
-import CaptionDisplay from '@/components/interview/CaptionDisplay';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Mic, MicOff, Volume2 } from "lucide-react";
+import CaptionDisplay from "@/components/interview/CaptionDisplay";
+import CodeEditor from "@/components/interview/CodeEditor";
+import { LearningModeIcon } from "@/components/icons/ModeIcons";
+import AppButton from "@/components/ui/AppButton";
+import { getSpeechLang, sanitizeSpeechText } from "@/lib/speech";
 
 type Problem = {
   title: string;
   description: string;
   input?: string;
   output?: string;
+  constraints?: string;
 };
 
 type ConversationItem = {
-  speaker: 'ai' | 'user';
+  speaker: "ai" | "user";
   text: string;
   timestamp: Date;
 };
 
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: Array<{
+    isFinal: boolean;
+    0: {
+      transcript: string;
+    };
+  }>;
+}
 
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+}
+
+interface SpeechRecognitionCtor {
+  new (): SpeechRecognitionLike;
+}
+
+function getMatchingVoice(language: "English" | "Hindi") {
+  if (typeof window === "undefined") return null;
+
+  const target = getSpeechLang(language).toLowerCase();
+  const voices = window.speechSynthesis.getVoices();
+
+  return (
+    voices.find((voice) => voice.lang.toLowerCase() === target) ||
+    voices.find((voice) => voice.lang.toLowerCase().startsWith(target.split("-")[0])) ||
+    null
+  );
+}
+
+function splitSpeechText(text: string, maxChunkLength = 220) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+
+  const sentences = normalized.split(/(?<=[.!?।])\s+/);
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const sentence of sentences) {
+    if (!sentence) continue;
+
+    if (`${current} ${sentence}`.trim().length <= maxChunkLength) {
+      current = `${current} ${sentence}`.trim();
+      continue;
+    }
+
+    if (current) {
+      chunks.push(current);
+    }
+
+    if (sentence.length <= maxChunkLength) {
+      current = sentence;
+      continue;
+    }
+
+    const words = sentence.split(" ");
+    let wordChunk = "";
+
+    for (const word of words) {
+      if (`${wordChunk} ${word}`.trim().length <= maxChunkLength) {
+        wordChunk = `${wordChunk} ${word}`.trim();
+      } else {
+        if (wordChunk) chunks.push(wordChunk);
+        wordChunk = word;
+      }
+    }
+
+    current = wordChunk;
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks;
+}
+
+function sanitizeExplanationText(text: string) {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/[*#_~]/g, " ")
+    .replace(/[-–—]+/g, " ")
+    .replace(/[|<>[\]{}]/g, " ")
+    .replace(/[:;]\s*\)/g, " ")
+    .replace(/\bO\(([^)]+)\)/gi, "Big O of $1")
+    .replace(/\bN\b/g, "N")
+    .replace(/\bchar_counts\b/g, "character counts")
+    .replace(/\bindex\b/gi, "index")
+    .replace(/\btime and space complexity\b/gi, "time and space complexity")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 const MAX_QUESTIONS = 5;
 
 export default function LearningSessionPage() {
   const router = useRouter();
-
-  // Session selections
-  const [programmingLanguage, setProgrammingLanguage] = useState('');
-  const [difficulty, setDifficulty] = useState('');
-  const [interviewLanguage, setInterviewLanguage] = useState<'English' | 'Hindi'>('English');
-
-  // AI content
+  const [programmingLanguage, setProgrammingLanguage] = useState("");
+  const [difficulty, setDifficulty] = useState("");
+  const [interviewLanguage, setInterviewLanguage] = useState<"English" | "Hindi">(
+    "English",
+  );
   const [problem, setProblem] = useState<Problem | null>(null);
-  const [aiSolution, setAiSolution] = useState<string>('');
-  const [aiExplanation, setAiExplanation] = useState<string>('');
+  const [aiSolution, setAiSolution] = useState("");
+  const [aiExplanation, setAiExplanation] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Phase: 'explain' | 'interview' | 'complete'
-  const [phase, setPhase] = useState<'explain' | 'interview' | 'complete'>('explain');
-
-  // Interview state (re-used interview flow)
+  const [phase, setPhase] = useState<"explain" | "interview" | "complete">(
+    "explain",
+  );
   const [conversation, setConversation] = useState<ConversationItem[]>([]);
-  const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
   const [questionCount, setQuestionCount] = useState(0);
-  const [submittedCode, setSubmittedCode] = useState<string>('');
-  const [isGeneratingQuestion, setIsGeneratingQuestion] = useState(false);
-  const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
-
-  // Captions/TTS
-  const [currentCaption, setCurrentCaption] = useState<{ speaker: 'ai' | 'user'; text: string; isActive: boolean }>({
-    speaker: 'ai',
-    text: '',
+  const [submittedCode, setSubmittedCode] = useState("");
+  const [currentCaption, setCurrentCaption] = useState({
+    speaker: "ai" as "ai" | "user",
+    text: "",
     isActive: false,
   });
-
-  // Voice recognition & user response (mirrors interview page)
-  const recognitionRef = useRef<any>(null);
   const [isListening, setIsListening] = useState(false);
-  const [userResponse, setUserResponse] = useState('');
+  const [userResponse, setUserResponse] = useState("");
+  const [isAISpeaking, setIsAISpeaking] = useState(false);
+  const [canUserRespond, setCanUserRespond] = useState(false);
+  const [isExplanationSpeaking, setIsExplanationSpeaking] = useState(false);
+
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const hasInitialized = useRef(false);
+  const speechGuardTimeoutRef = useRef<number | null>(null);
+  const explanationPlaybackIdRef = useRef(0);
 
-  // Helper: speak text and show caption (same style as interview page)
-  const speakText = (text: string, onComplete?: () => void) => {
-    try {
-      if (!text) return;
-      const cleanText = text.replace(/###/g, '').replace(/##/g, '').replace(/\*\*/g, '').replace(/---/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+  const getProblemHistory = useCallback(() => {
+    const raw = sessionStorage.getItem("learningProblemHistory");
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  }, []);
 
-      // show caption
-      setCurrentCaption({ speaker: 'ai', text: cleanText, isActive: true });
+  const saveProblemHistory = useCallback((title: string) => {
+    const nextHistory = [...getProblemHistory(), title].slice(-12);
+    sessionStorage.setItem("learningProblemHistory", JSON.stringify(nextHistory));
+  }, [getProblemHistory]);
 
-      const utter = new SpeechSynthesisUtterance(cleanText);
-      utter.lang = interviewLanguage === 'Hindi' ? 'hi-IN' : 'en-US';
-      utter.rate = 0.9;
-      utter.onend = () => {
-        setTimeout(() => {
-          setCurrentCaption(prev => ({ ...prev, isActive: false }));
-          if (onComplete) onComplete();
-        }, 300);
-      };
-
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utter);
-    } catch (e) {
-      console.error('TTS error', e);
-    }
-  };
-
-  // init: load selections + generate solution
   useEffect(() => {
     if (hasInitialized.current) return;
     hasInitialized.current = true;
 
-    const lang = sessionStorage.getItem('programmingLanguage');
-    const diff = sessionStorage.getItem('difficulty');
-    const iLang = sessionStorage.getItem('interviewLanguage') as 'English' | 'Hindi' | null;
+    const lang = sessionStorage.getItem("programmingLanguage");
+    const diff = sessionStorage.getItem("difficulty");
+    const iLang = sessionStorage.getItem("interviewLanguage") as "English" | "Hindi" | null;
 
     if (!lang || !diff || !iLang) {
-      router.push('/learning-mode/setup');
+      router.push("/learning-mode/setup");
       return;
     }
 
     setProgrammingLanguage(lang);
     setDifficulty(diff);
-    setInterviewLanguage(iLang as 'English' | 'Hindi');
+    setInterviewLanguage(iLang);
 
     (async () => {
       setLoading(true);
       setError(null);
+
       try {
-        // NOTE: use the correct endpoint that you provided in your repo
-        const res = await fetch('/api/learning-mode/generate-solution', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ programmingLanguage: lang, difficulty: diff, interviewLanguage: iLang }),
-        });
+        const res = await fetch("/api/learning-mode/generate-solution", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+          programmingLanguage: lang,
+          difficulty: diff,
+          interviewLanguage: iLang,
+          previousTitles: getProblemHistory(),
+        }),
+      });
 
         const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data?.error || 'Failed to generate solution');
-        }
+        if (!res.ok) throw new Error(data?.error || "Failed to generate solution");
 
         setProblem(data.problem);
-        setAiSolution(data.solution || '');
-        setAiExplanation(data.explanation || '');
-
-        sessionStorage.setItem('aiSolution', data.solution || '');
-        sessionStorage.setItem('aiExplanation', data.explanation || '');
-        sessionStorage.setItem('mode', 'learning');
-
-        setPhase('explain');
+        saveProblemHistory(data.problem.title);
+        setAiSolution(data.solution || "");
+        setAiExplanation(data.explanation || "");
+        sessionStorage.setItem("aiSolution", data.solution || "");
+        sessionStorage.setItem("aiExplanation", data.explanation || "");
+        sessionStorage.setItem("mode", "learning");
+        setCanUserRespond(false);
         setLoading(false);
-      } catch (err: any) {
-        console.error('generate-solution error:', err);
-        setError(err?.message || 'Failed to generate learning content');
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : "Failed to generate learning content";
+        setError(message);
         setLoading(false);
       }
     })();
-  }, [router]);
+  }, [getProblemHistory, router, saveProblemHistory]);
 
-  // SpeechRecognition initialization (mirror interview page behaviour)
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.warn('SpeechRecognition not supported');
-      return;
-    }
+    const speechWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    const SpeechRecognition =
+      speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = interviewLanguage === 'Hindi' ? 'hi-IN' : 'en-US';
+    recognition.lang = interviewLanguage === "Hindi" ? "hi-IN" : "en-US";
 
-    recognition.onstart = () => {
-      console.log('Speech recognition started');
-      setIsListening(true);
-    };
-
-    recognition.onresult = (event: any) => {
-      let interimTranscript = '';
-      let finalTranscript = '';
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: SpeechRecognitionEventLike) => {
+      let interimTranscript = "";
+      let finalTranscript = "";
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript + ' ';
+          finalTranscript += `${transcript} `;
         } else {
           interimTranscript += transcript;
         }
       }
 
-      // Append final transcript to userResponse
       if (finalTranscript.trim()) {
-        setUserResponse(prev => (prev + ' ' + finalTranscript).trim());
+        setUserResponse((prev) => `${prev} ${finalTranscript}`.trim());
       }
 
-      const captionText = (finalTranscript + interimTranscript).trim();
+      const captionText = `${finalTranscript}${interimTranscript}`.trim();
       if (captionText) {
-        setCurrentCaption({ speaker: 'user', text: captionText, isActive: true });
+        setCurrentCaption({
+          speaker: "user",
+          text: captionText,
+          isActive: true,
+        });
       }
-
-      console.log('Interim:', interimTranscript, 'Final:', finalTranscript);
     };
-
-recognition.onend = () => {
-  console.log('Speech recognition ended');
-  setIsListening(false);
-
-  // Hide captions after user stops speaking
-  setTimeout(() => {
-    setCurrentCaption(prev => ({
-      ...prev,
-      isActive: false,
-    }));
-  }, 1200);
-};
-
-
-    recognition.onerror = (e: any) => {
-      console.error('Speech recognition error:', e);
+    recognition.onend = () => {
       setIsListening(false);
+      setCurrentCaption({
+        speaker: "user",
+        text: "",
+        isActive: false,
+      });
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+      setCurrentCaption({
+        speaker: "user",
+        text: "",
+        isActive: false,
+      });
     };
 
     recognitionRef.current = recognition;
 
     return () => {
-      try {
-        recognition.stop();
-      } catch (e) {}
+      recognition.stop();
       recognitionRef.current = null;
     };
   }, [interviewLanguage]);
 
-  const startListening = () => {
-    if (recognitionRef.current && !isListening) {
-      setUserResponse(''); // clear previous
-      try {
-        recognitionRef.current.start();
-      } catch (e) {
-        console.error('start listening error', e);
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined") {
+        if (speechGuardTimeoutRef.current) {
+          window.clearTimeout(speechGuardTimeoutRef.current);
+        }
+        window.speechSynthesis.cancel();
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const loadVoices = () => {
+      window.speechSynthesis.getVoices();
+    };
+
+    loadVoices();
+    window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+
+    return () => {
+      window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
+    };
+  }, []);
+
+  const speakText = useCallback((
+    text: string,
+    options?: {
+      unlockResponse?: boolean;
+      onComplete?: () => void;
+      showCaption?: boolean;
+    },
+  ) => {
+    const cleanText = sanitizeSpeechText(text);
+
+    if (!cleanText) {
+      setIsAISpeaking(false);
+      if (options?.unlockResponse) {
+        setCanUserRespond(true);
+      }
+      options?.onComplete?.();
+      return;
     }
+
+    if (speechGuardTimeoutRef.current) {
+      window.clearTimeout(speechGuardTimeoutRef.current);
+    }
+
+    window.speechSynthesis.cancel();
+    setIsAISpeaking(true);
+    setCanUserRespond(false);
+    if (options?.showCaption !== false) {
+      setCurrentCaption({
+        speaker: "ai",
+        text: cleanText,
+        isActive: true,
+      });
+    } else {
+      setCurrentCaption({
+        speaker: "ai",
+        text: "",
+        isActive: false,
+      });
+    }
+
+    const finishSpeech = () => {
+      if (speechGuardTimeoutRef.current) {
+        window.clearTimeout(speechGuardTimeoutRef.current);
+        speechGuardTimeoutRef.current = null;
+      }
+
+      setIsAISpeaking(false);
+      setCurrentCaption({
+        speaker: "ai",
+        text: "",
+        isActive: false,
+      });
+
+      if (options?.unlockResponse) {
+        setCanUserRespond(true);
+      }
+
+      options?.onComplete?.();
+    };
+
+      const utter = new SpeechSynthesisUtterance(cleanText);
+    utter.lang = getSpeechLang(interviewLanguage);
+    const voice = getMatchingVoice(interviewLanguage);
+    if (voice) {
+      utter.voice = voice;
+    }
+    utter.rate = 0.9;
+    utter.onend = finishSpeech;
+    utter.onerror = finishSpeech;
+
+    speechGuardTimeoutRef.current = window.setTimeout(
+      finishSpeech,
+      Math.max(6000, cleanText.length * 85),
+    );
+
+    window.speechSynthesis.speak(utter);
+    window.speechSynthesis.resume();
+  }, [interviewLanguage]);
+
+  const playExplanation = useCallback((text: string) => {
+    const cleanedText = sanitizeSpeechText(sanitizeExplanationText(text));
+    const chunks = splitSpeechText(cleanedText);
+    if (!chunks.length || typeof window === "undefined") {
+      return;
+    }
+
+    explanationPlaybackIdRef.current += 1;
+    const playbackId = explanationPlaybackIdRef.current;
+    const voice = getMatchingVoice(interviewLanguage);
+    const lang = getSpeechLang(interviewLanguage);
+
+    window.speechSynthesis.cancel();
+    setIsExplanationSpeaking(true);
+
+    const speakChunk = (index: number) => {
+      if (playbackId !== explanationPlaybackIdRef.current) return;
+
+      if (index >= chunks.length) {
+        setIsExplanationSpeaking(false);
+        setCurrentCaption({
+          speaker: "ai",
+          text: "",
+          isActive: false,
+        });
+        return;
+      }
+
+      setCurrentCaption({
+        speaker: "ai",
+        text: chunks[index],
+        isActive: true,
+      });
+
+      const utterance = new SpeechSynthesisUtterance(chunks[index]);
+      utterance.lang = lang;
+      utterance.rate = 0.9;
+      if (voice) {
+        utterance.voice = voice;
+      }
+
+      utterance.onend = () => speakChunk(index + 1);
+      utterance.onerror = () => {
+        setIsExplanationSpeaking(false);
+        setCurrentCaption({
+          speaker: "ai",
+          text: "",
+          isActive: false,
+        });
+      };
+
+      window.speechSynthesis.speak(utterance);
+      window.speechSynthesis.resume();
+    };
+
+    speakChunk(0);
+  }, [interviewLanguage]);
+
+  const displayExplanation = sanitizeExplanationText(aiExplanation);
+
+  const startListening = () => {
+    if (!recognitionRef.current || isListening || isAISpeaking || !canUserRespond) return;
+    try {
+      recognitionRef.current.start();
+    } catch {}
   };
 
   const stopListening = () => {
-    if (recognitionRef.current && isListening) {
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {
-        console.error('stop listening error', e);
-      }
-    }
+    if (!recognitionRef.current || !isListening) return;
+    try {
+      recognitionRef.current.stop();
+    } catch {}
   };
 
-  // Start interview flow (triggered by "Start interview on this coding question")
   const startInterviewOnSolution = async () => {
     if (!aiSolution) {
-      alert('AI solution missing');
+      alert("AI solution missing");
       return;
     }
 
     setSubmittedCode(aiSolution);
-    sessionStorage.setItem('submittedCode', aiSolution);
-
+    sessionStorage.setItem("submittedCode", aiSolution);
     setConversation([]);
     setQuestionCount(0);
-    setCurrentQuestion(null);
-    setPhase('interview');
-
-    // ask first question (askNextQuestion will derive next question number from conversation)
-    await askNextQuestion(aiSolution, []);
+    setPhase("interview");
+    setCanUserRespond(false);
+    await askNextQuestion(aiSolution, [], 1);
   };
 
-  // Robust askNextQuestion: derive nextQuestionNumber from previousConversation (count AI messages)
-  const askNextQuestion = async (code: string, previousConversation: ConversationItem[]) => {
-    setIsGeneratingQuestion(true);
+  const askNextQuestion = async (
+    code: string,
+    previousConversation: ConversationItem[],
+    nextQuestionNumber?: number,
+  ) => {
+    const questionNumber = nextQuestionNumber ?? questionCount + 1;
+
+    if (questionNumber > MAX_QUESTIONS) {
+      await generateFeedback(code, previousConversation);
+      return;
+    }
+
+    setLoading(true);
 
     try {
-      const aiMessages = previousConversation.filter((p) => p.speaker === 'ai').length;
-      if (aiMessages >= MAX_QUESTIONS) {
-        // generate feedback directly
-        await generateFeedback(code, previousConversation);
-        setIsGeneratingQuestion(false);
-        return;
-      }
-
-      const nextQuestionNumber = aiMessages + 1;
-
-      const response = await fetch('/api/interview/ask-question', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/interview/ask-question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code,
           problem,
           conversation: previousConversation,
-          questionNumber: nextQuestionNumber,
+          questionNumber,
           interviewLanguage,
         }),
       });
 
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.error || 'Failed to ask question');
-      }
+      if (!response.ok) throw new Error(data?.error || "Failed to ask question");
 
-      const question = data.question;
-      setCurrentQuestion(question);
-      setQuestionCount((prev) => {
-        // synchronize with derived aiMessages + 1
-        const newCount = Math.max(prev, nextQuestionNumber);
-        return newCount;
-      });
-
-      const newConversation: ConversationItem[] = [
+      const nextConversation = [
         ...previousConversation,
-        { speaker: 'ai', text: question, timestamp: new Date(), },
+        { speaker: "ai" as const, text: data.question, timestamp: new Date() },
       ];
-      setConversation(newConversation);
 
-      // speak question and show caption
-      speakText(question);
-      setIsGeneratingQuestion(false);
-    } catch (err) {
-      console.error('ask-question error', err);
-      setIsGeneratingQuestion(false);
-      alert('Failed to generate the next question. Please try again.');
+      setConversation(nextConversation);
+      setQuestionCount(questionNumber);
+      setLoading(false);
+      speakText(data.question, { unlockResponse: true });
+    } catch {
+      setLoading(false);
+      setCanUserRespond(true);
+      alert("Failed to generate the next question. Please try again.");
     }
   };
 
-  // Handle typed or speech-based submit (mirrors interview page submitResponse)
-  const submitResponse = async () => {
+  const submitResponse = () => {
     const finalResponse = userResponse.trim();
     if (!finalResponse) {
-      alert('Please provide a response before submitting');
+      alert("Please provide a response before submitting");
       return;
     }
 
     if (isListening) stopListening();
 
-const newConversation: ConversationItem[] = [
-  ...conversation,
-  { speaker: 'user', text: finalResponse, timestamp: new Date() },
-];
+    const newConversation = [
+      ...conversation,
+      { speaker: "user" as const, text: finalResponse, timestamp: new Date() },
+    ];
 
     setConversation(newConversation);
-    setUserResponse('');
-    setCurrentCaption({ speaker: 'ai', text: '', isActive: false });
+    setUserResponse("");
+    setCanUserRespond(false);
+    setCurrentCaption({ speaker: "ai", text: "", isActive: false });
 
-    // Wait a short while and ask next (gives TTS / UI a moment)
     setTimeout(() => {
-      askNextQuestion(submittedCode || aiSolution, newConversation);
-    }, 800);
+      askNextQuestion(submittedCode || aiSolution, newConversation, questionCount + 1);
+    }, 250);
   };
 
-  // Also allow handleUserAnswer from the textarea on Enter (this keeps parity with interview session's behaviour)
-  const handleUserAnswerDirect = async (text: string) => {
-const newConversation: ConversationItem[] = [
-  ...conversation,
-  {
-    speaker: 'user',
-    text,
-    timestamp: new Date(),
-  },
-];
+  const generateFeedback = async (
+    code: string,
+    conversationData: ConversationItem[],
+  ) => {
+    setPhase("complete");
+    setLoading(true);
 
-    setConversation(newConversation);
-    setUserResponse('');
-
-    // if max reached, generate feedback
-    const aiMessages = newConversation.filter((p) => p.speaker === 'ai').length;
-    if (aiMessages >= MAX_QUESTIONS) {
-      await generateFeedback(submittedCode || aiSolution, newConversation);
-      return;
-    }
-
-    await askNextQuestion(submittedCode || aiSolution, newConversation);
-  };
-
-  const generateFeedback = async (code: string, conversationData: ConversationItem[]) => {
-    setIsGeneratingFeedback(true);
     try {
-      const res = await fetch('/api/interview/generate-feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/interview/generate-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code,
           problem,
@@ -375,60 +579,40 @@ const newConversation: ConversationItem[] = [
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Failed to generate feedback');
+      if (!res.ok) throw new Error(data?.error || "Failed to generate feedback");
 
-      sessionStorage.setItem('learningFeedback', data.feedback || '');
-      // ✅ Save session to MongoDB
-await fetch('/api/session/save', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    mode: 'learning',
-    programmingLanguage,
-    difficulty,
-    interviewLanguage,
-    problem,
-    aiSolution,
-    aiExplanation,
-    conversation: conversationData,
-    feedback: data.feedback || '',
-  }),
-});
+      sessionStorage.setItem("learningFeedback", data.feedback || "");
 
-      const sessionObj = {
-        mode: 'learning',
-        createdAt: new Date().toISOString(),
-        programmingLanguage,
-        difficulty,
-        interviewLanguage,
-        problem,
-        aiSolution,
-        aiExplanation,
-        conversation: conversationData,
-        feedback: data.feedback || '',
-      };
-      sessionStorage.setItem('lastSession', JSON.stringify(sessionObj));
+      await fetch("/api/session/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "learning",
+          programmingLanguage,
+          difficulty,
+          interviewLanguage,
+          problem,
+          aiSolution,
+          aiExplanation,
+          conversation: conversationData,
+          feedback: data.feedback || "",
+        }),
+      });
 
-      setIsGeneratingFeedback(false);
-      setPhase('complete');
-
-      setTimeout(() => {
-        router.push('/learning-mode/feedback');
-      }, 1200);
-    } catch (err) {
-      console.error('generate-feedback error', err);
-      setIsGeneratingFeedback(false);
-      alert('Failed to generate feedback. Please try again.');
+      window.speechSynthesis.cancel();
+      router.push("/learning-mode/feedback");
+    } catch {
+      setLoading(false);
+      alert("Failed to generate feedback. Please try again.");
     }
   };
 
-  // Loading & error screens (same minimal behavior you used)
-  if (loading) {
+  if (loading && !problem) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-white">
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
-          <p className="text-slate-300 font-semibold">Generating learning content...</p>
+          <div className="mb-4 inline-flex h-16 w-16 animate-spin items-center justify-center rounded-full border-4 border-gray-200 border-t-black" />
+          <p className="font-semibold text-gray-700">Generating learning content...</p>
         </div>
       </div>
     );
@@ -436,173 +620,182 @@ await fetch('/api/session/save', {
 
   if (error || !problem) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-800 border border-red-600 rounded-2xl p-8 text-center">
-          <p className="text-red-400 font-semibold mb-4">{error || 'Failed to load learning content'}</p>
-          <button onClick={() => router.push('/learning-mode/setup')} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md">
+      <div className="flex min-h-screen items-center justify-center bg-white p-4">
+        <div className="w-full max-w-md rounded-3xl border border-gray-200 bg-white p-8 text-center shadow-xl">
+          <p className="mb-4 font-semibold text-black">
+            {error || "Failed to load learning content"}
+          </p>
+          <AppButton onClick={() => router.push("/learning-mode/setup")}>
             Go back to setup
-          </button>
+          </AppButton>
         </div>
       </div>
     );
   }
 
-  // Main render
   return (
-    <div className="min-h-screen bg-[var(--color-background)] p-6">
-      <div className="max-w-7xl mx-auto mb-6">
-        <div className="bg-[var(--color-primary)] text-white px-6 py-4 rounded-lg shadow-lg">
-          <h1 className="text-2xl font-bold">🟩 Learning Mode</h1>
-          <p className="text-sm opacity-90 mt-1">
-            {programmingLanguage} • {difficulty} • {interviewLanguage}
-          </p>
+    <div className="min-h-screen bg-white p-6">
+      <div className="mx-auto mb-6 max-w-7xl rounded-3xl border border-gray-200 bg-white px-6 py-5 shadow-sm">
+        <div className="mb-2 flex items-center gap-3">
+          <LearningModeIcon size={30} />
+          <h1 className="text-3xl font-black text-black">Learning Mode</h1>
         </div>
+        <p className="text-sm text-gray-600">
+          {programmingLanguage} • {difficulty} • {interviewLanguage}
+        </p>
       </div>
 
-      <div className="max-w-7xl mx-auto">
-        {phase === 'explain' && problem && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-6">
-              <h2 className="text-xl font-bold text-[var(--color-text)] mb-4">Problem Statement</h2>
+      <div className="mx-auto max-w-7xl">
+        {phase === "explain" && (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="mb-4 text-2xl font-bold text-black">Problem Statement</h2>
               <div className="space-y-4">
                 <div>
-                  <h3 className="font-semibold text-[var(--color-text)] mb-2">{problem.title}</h3>
-                  <p className="text-[var(--color-text-secondary)]">{problem.description}</p>
-                  {problem.input && (
-                    <div className="mt-3">
-                      <strong className="text-sm text-[var(--color-text)]">Input:</strong>
-                      <p className="text-[var(--color-text-secondary)]">{problem.input}</p>
-                    </div>
-                  )}
-                  {problem.output && (
-                    <div className="mt-3">
-                      <strong className="text-sm text-[var(--color-text)]">Output:</strong>
-                      <p className="text-[var(--color-text-secondary)]">{problem.output}</p>
-                    </div>
-                  )}
+                  <h3 className="mb-2 text-xl font-semibold text-black">{problem.title}</h3>
+                  <p className="leading-8 text-gray-700">{problem.description}</p>
                 </div>
+
+                {problem.input && (
+                  <div className="rounded-2xl border border-gray-300 bg-gray-50 p-4">
+                    <p className="mb-1 text-sm font-semibold text-black">Input</p>
+                    <p className="text-sm text-gray-700">{problem.input}</p>
+                  </div>
+                )}
+
+                {problem.output && (
+                  <div className="rounded-2xl border border-gray-300 bg-gray-50 p-4">
+                    <p className="mb-1 text-sm font-semibold text-black">Output</p>
+                    <p className="text-sm text-gray-700">{problem.output}</p>
+                  </div>
+                )}
+
+                {problem.constraints && (
+                  <div className="rounded-2xl border border-gray-300 bg-gray-50 p-4">
+                    <p className="mb-1 text-sm font-semibold text-black">Constraints</p>
+                    <p className="text-sm text-gray-700">{problem.constraints}</p>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-6 flex flex-col">
-              <div className="mb-4">
-                <h3 className="font-semibold text-[var(--color-text)]">AI Optimal Solution</h3>
-                <p className="text-xs text-[var(--color-text-secondary)] mt-1">This is the AI generated optimal code (read-only).</p>
+            <div className="space-y-4 rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+              <div>
+                <h3 className="font-semibold text-black">AI Optimal Solution</h3>
+                <p className="mt-1 text-xs text-gray-600">
+                  This is the AI generated optimal code in read-only mode.
+                </p>
               </div>
 
               <CodeEditor language={programmingLanguage} initialCode={aiSolution} readOnly />
 
-              <div className="mt-4">
-                <h4 className="text-md font-semibold text-[var(--color-text)] mb-2">Explanation</h4>
-                <div className="p-3 bg-slate-900 rounded-md max-h-56 overflow-auto text-[var(--color-text-secondary)]">
-                  {aiExplanation || 'No explanation provided.'}
+              <div>
+                <h4 className="mb-2 text-lg font-semibold text-black">Explanation</h4>
+                <div className="max-h-[400px] w-full overflow-y-auto rounded-2xl border border-gray-300 bg-gray-50 p-4 text-gray-700 leading-8 break-words">
+                  {displayExplanation || "No explanation provided."}
                 </div>
+              </div>
 
-                <div className="mt-4 flex items-center gap-3">
-                  <button onClick={() => speakText(aiExplanation)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md">
-                    ▶️ Play Explanation
-                  </button>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <AppButton
+                  onClick={() => playExplanation(displayExplanation)}
+                  disabled={!displayExplanation}
+                  className="sm:min-w-48"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Volume2 size={18} />
+                    {isExplanationSpeaking ? "Playing Explanation..." : "Play Explanation"}
+                  </span>
+                </AppButton>
 
-                  <button onClick={startInterviewOnSolution} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md">
-                    🧑‍💻 Start interview on this coding question
-                  </button>
-                </div>
+                <AppButton onClick={startInterviewOnSolution} fullWidth>
+                  Start Interview Simulation
+                </AppButton>
               </div>
             </div>
           </div>
         )}
 
-{phase === 'interview' && (
-  <div className="max-w-4xl mx-auto">
+        {phase === "interview" && (
+          <div className="mx-auto max-w-4xl space-y-6">
+            <div className="max-h-96 overflow-y-auto rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="mb-4 text-2xl font-bold text-black">Conversation</h2>
 
-    {/* Conversation History */}
-    <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-6 mb-6 max-h-96 overflow-y-auto">
-      <h2 className="text-xl font-bold text-[var(--color-text)] mb-4">
-        Conversation
-      </h2>
+              <div className="space-y-4">
+                {conversation.map((item, index) => (
+                  <div
+                    key={index}
+                    className={`rounded-2xl border p-4 ${
+                      item.speaker === "ai"
+                        ? "border-gray-300 bg-gray-50"
+                        : "border-gray-400 bg-white"
+                    }`}
+                  >
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                      {item.speaker === "ai" ? "AI" : "You"}
+                    </p>
+                    <p className="whitespace-pre-wrap text-black">{item.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-      <div className="space-y-4">
-        {conversation.map((item, index) => (
-          <div
-            key={index}
-            className={`p-4 rounded-lg ${
-              item.speaker === 'ai'
-                ? 'bg-[var(--color-bg-1)] border-l-4 border-[var(--color-primary)]'
-                : 'bg-[var(--color-bg-4)] border-l-4 border-blue-500'
-            }`}
-          >
-            <p
-              className="text-xs font-semibold mb-1"
-              style={{
-                color:
-                  item.speaker === 'ai'
-                    ? 'var(--color-primary)'
-                    : '#2563EB',
-              }}
-            >
-              {item.speaker === 'ai' ? 'AI' : 'You'}
-            </p>
+            <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="mb-4 text-xl font-semibold text-black">Your Response</h3>
 
-            <p className="text-[var(--color-text)] whitespace-pre-wrap">
-              {item.text}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
+              <textarea
+                value={userResponse}
+                onChange={(e) => setUserResponse(e.target.value)}
+                placeholder={
+                  !canUserRespond || isAISpeaking
+                    ? "Wait for the AI to finish speaking..."
+                    : "Type or speak your answer here..."
+                }
+                disabled={isAISpeaking || !canUserRespond}
+                className="mb-4 h-32 w-full resize-none rounded-2xl border border-gray-300 bg-white p-4 text-black outline-none transition focus:border-black disabled:bg-gray-100 disabled:text-gray-500"
+              />
 
-    {/* Response Input */}
-    <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-6">
-      <h3 className="font-semibold text-[var(--color-text)] mb-4">
-        Your Response
-      </h3>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <AppButton
+                  onClick={isListening ? stopListening : startListening}
+                  disabled={isAISpeaking || loading || !canUserRespond}
+                  className="sm:min-w-56"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+                    {isListening ? "Stop Speaking" : "Start Speaking"}
+                  </span>
+                </AppButton>
 
-      <textarea
-        value={userResponse}
-        onChange={(e) => setUserResponse(e.target.value)}
-        placeholder="Type or speak your answer here..."
-        className="w-full h-32 p-4 bg-[var(--color-background)] text-[var(--color-text)] rounded border border-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] resize-none mb-4"
-      />
-
-      <div className="flex gap-3">
-        <button
-          onClick={isListening ? stopListening : startListening}
-          className={`px-6 py-3 rounded-lg font-semibold transition-all flex items-center gap-2 ${
-            isListening
-              ? 'bg-red-500 hover:bg-red-600 text-white'
-              : 'bg-[var(--color-secondary)] hover:bg-[var(--color-secondary-hover)] text-[var(--color-text)]'
-          }`}
-        >
-          <span>
-            {isListening ? '🔴 Stop Speaking' : '🎤 Start Speaking'}
-          </span>
-
-          {isListening && <span className="animate-pulse">●</span>}
-        </button>
-
-        <button
-          onClick={submitResponse}
-          disabled={!userResponse.trim()}
-          className="flex-1 px-6 py-3 bg-[var(--color-primary)] text-white rounded-lg font-semibold hover:bg-[var(--color-primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-        >
-          Submit Response
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
-
-        {phase === 'complete' && (
-          <div className="mt-8 text-center">
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">Interview completed — generating feedback...</h3>
-            <p className="text-[var(--color-text-secondary)] mt-2">You will be redirected to the feedback page shortly.</p>
+                <AppButton
+                  onClick={submitResponse}
+                  disabled={!userResponse.trim() || isAISpeaking || loading || !canUserRespond}
+                  fullWidth
+                >
+                  Submit Response
+                </AppButton>
+              </div>
+            </div>
           </div>
         )}
+
+        {phase === "complete" && (
+          <div className="mt-8 text-center">
+            <div className="mx-auto mb-4 h-16 w-16 animate-spin rounded-full border-b-4 border-t-4 border-gray-300 border-t-black" />
+            <h3 className="text-lg font-semibold text-black">
+              Interview completed. Generating feedback...
+            </h3>
+          </div>
+        )}
+
       </div>
 
-      {/* Captions (shared component) */}
-      <CaptionDisplay speaker={currentCaption.speaker} text={currentCaption.text} isActive={currentCaption.isActive} language={interviewLanguage} />
+      <CaptionDisplay
+        speaker={currentCaption.speaker}
+        text={currentCaption.text}
+        isActive={currentCaption.isActive}
+        language={interviewLanguage}
+      />
     </div>
   );
 }
